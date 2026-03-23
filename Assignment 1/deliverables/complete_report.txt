@@ -1,0 +1,39 @@
+
+ASSIGNMENT SOLUTION - COMPLETE RESULTS
+======================================================================
+
+Environment: 5x6 grid (30 states)
+Start: 0, Goal: 29
+Gamma: 0.99, Theta: 1e-08
+
+PART 1: POLICY EVALUATION
+- Evaluated random policy
+- V(start) = -200.00
+- Time: 0.1030s
+
+PART 2: Q-VALUE COMPUTATION
+- Q(start, DOWN) = 9219.72 (best action)
+- Computed from optimal V(s)
+
+PART 3: POLICY IMPROVEMENT
+- Changed 23/30 states
+- V(start): -200.00 -> -100.00
+
+PART 4: POLICY ITERATION
+- Time: 0.4690s
+- Path: [0, 6, 12, 18, 24, 25, 26, 27, 28, 29]
+- V(start) = 9219.72
+
+PART 5: VALUE ITERATION
+- Time: 0.2210s
+- Speedup: 2.12x vs PI
+- Same optimal policy: True
+- Optimal path: [0, 6, 12, 18, 24, 25, 26, 27, 28, 29]
+
+DELIVERABLES SAVED:
+- part1_random_policy_heatmap.png
+- part3_improved_policy_heatmap.png
+- part4_policy_iteration_heatmap.png
+- part5_value_iteration_heatmap.png
+- simulation_demo.gif
+======================================================================

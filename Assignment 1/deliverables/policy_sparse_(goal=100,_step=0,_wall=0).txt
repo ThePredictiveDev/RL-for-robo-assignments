@@ -1,0 +1,12 @@
+Optimal Policy - Sparse (Goal=100, Step=0, Wall=0)
+======================================================================
+
+Optimal Policy (Arrows indicate action):
+----------------------------
+Row 0: | v | v | v | v | v | v |
+Row 1: | v | v | v | v | v | v |
+Row 2: | v | v | v | v | v | v |
+Row 3: | v | v | v | v | v | v |
+Row 4: | > | > | > | > | > |  G |
+----------------------------
+Legend: < LEFT, v DOWN, > RIGHT, ^ UP, G GOAL

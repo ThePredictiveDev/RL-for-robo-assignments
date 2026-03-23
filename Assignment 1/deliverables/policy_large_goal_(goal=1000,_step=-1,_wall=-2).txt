@@ -1,0 +1,12 @@
+Optimal Policy - Large Goal (Goal=1000, Step=-1, Wall=-2)
+======================================================================
+
+Optimal Policy (Arrows indicate action):
+----------------------------
+Row 0: | v | v | v | v | v | v |
+Row 1: | v | v | v | v | v | v |
+Row 2: | v | v | v | v | v | v |
+Row 3: | v | v | v | v | v | v |
+Row 4: | > | > | > | > | > |  G |
+----------------------------
+Legend: < LEFT, v DOWN, > RIGHT, ^ UP, G GOAL

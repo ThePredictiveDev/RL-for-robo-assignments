@@ -1,0 +1,111 @@
+================================================================================
+DYNAMIC PROGRAMMING FOR ROBOTIC PATH PLANNING - ANALYSIS REPORT
+================================================================================
+
+1. INTRODUCTION
+--------------------------------------------------------------------------------
+This report analyzes the implementation and performance of Dynamic Programming
+algorithms (Policy Iteration and Value Iteration) for robotic path planning.
+The UR5 robot navigates a 5x6 grid world using optimal policies computed
+through these algorithms.
+
+2. ALGORITHM IMPLEMENTATION
+--------------------------------------------------------------------------------
+The following algorithms were implemented in utils.py:
+
+a) Policy Evaluation:
+   - Iteratively computes V(s) using Bellman expectation equation
+   - V(s) = sum_a pi(a|s) * sum_{s',r} P(s',r|s,a) * [r + gamma * V(s')]
+
+b) Q-value Computation:
+   - Computes Q(s,a) from V(s) using one-step lookahead
+   - Q(s,a) = sum_{s',r} P(s',r|s,a) * [r + gamma * V(s')]
+
+c) Policy Improvement:
+   - Derives greedy policy: pi'(s) = argmax_a Q(s,a)
+
+d) Policy Iteration:
+   - Alternates between evaluation and improvement until convergence
+   - Guarantees optimal policy upon convergence
+
+e) Value Iteration:
+   - Directly computes optimal V using Bellman optimality
+   - V(s) = max_a sum_{s',r} P(s',r|s,a) * [r + gamma * V(s')]
+
+3. EXPERIMENTAL RESULTS
+--------------------------------------------------------------------------------
+
+3.1 Standard (Goal=100, Step=-1, Wall=-2)
+   Parameters: {'goal_reward': 100.0, 'step_cost': -1.0, 'wall_penalty': -2.0}
+   Average PI Time: 0.7447s (std: 0.0070)
+   Average VI Time: 0.2187s (std: 0.0005)
+   VI Speedup: 3.41x
+   Path Length: 10 states
+   V(start): 9219.72
+   V(goal): 10000.00
+
+3.2 Sparse (Goal=100, Step=0, Wall=0)
+   Parameters: {'goal_reward': 100.0, 'step_cost': 0.0, 'wall_penalty': 0.0}
+   Average PI Time: 1.1417s (std: 0.0090)
+   Average VI Time: 0.2230s (std: 0.0042)
+   VI Speedup: 5.12x
+   Path Length: 10 states
+   V(start): 9227.45
+   V(goal): 10000.00
+
+3.3 High Penalty (Goal=100, Step=-5, Wall=-10)
+   Parameters: {'goal_reward': 100.0, 'step_cost': -5.0, 'wall_penalty': -10.0}
+   Average PI Time: 0.7933s (std: 0.1162)
+   Average VI Time: 0.2187s (std: 0.0005)
+   VI Speedup: 3.63x
+   Path Length: 10 states
+   V(start): 9188.82
+   V(goal): 10000.00
+
+3.4 Large Goal (Goal=1000, Step=-1, Wall=-2)
+   Parameters: {'goal_reward': 1000.0, 'step_cost': -1.0, 'wall_penalty': -2.0}
+   Average PI Time: 0.8297s (std: 0.0031)
+   Average VI Time: 0.2400s (std: 0.0000)
+   VI Speedup: 3.46x
+   Path Length: 10 states
+   V(start): 92266.74
+   V(goal): 100000.00
+
+4. KEY FINDINGS
+--------------------------------------------------------------------------------
+
+4.1 Computation Time:
+   - Value Iteration is consistently faster than Policy Iteration
+   - Best performing setup: High Penalty (Goal=100, Step=-5, Wall=-10)
+   - VI achieves 3.63x speedup over PI
+
+4.2 Path Quality:
+   - All reward structures converge to optimal path length (10 states)
+   - Path: 0->6->12->18->24->25->26->27->28->29
+   - This is the theoretically optimal path (9 moves minimum)
+
+4.3 Reward Structure Impact:
+   - Standard (Goal=100, Step=-1, Wall=-2): V(start)=9219.72, V(goal)=10000.00
+   - Sparse (Goal=100, Step=0, Wall=0): V(start)=9227.45, V(goal)=10000.00
+   - High Penalty (Goal=100, Step=-5, Wall=-10): V(start)=9188.82, V(goal)=10000.00
+   - Large Goal (Goal=1000, Step=-1, Wall=-2): V(start)=92266.74, V(goal)=100000.00
+
+5. CONCLUSIONS
+--------------------------------------------------------------------------------
+1. Both Policy Iteration and Value Iteration converge to the same optimal policy
+2. Value Iteration is significantly faster (2-4x speedup observed)
+3. Reward structure affects value magnitudes but not optimal path
+4. Optimal path has 10 states (9 moves) which is theoretically optimal
+5. All algorithms properly converge with delta < theta threshold
+
+6. DELIVERABLES
+--------------------------------------------------------------------------------
+The following files have been generated in the deliverables folder:
+  - comparison_table.txt: Performance comparison of all experiments
+  - heatmap_*.txt: Value function heatmaps for each reward structure
+  - policy_*.txt: Optimal policy visualizations
+  - analysis_report.txt: This comprehensive report
+
+================================================================================
+END OF REPORT
+================================================================================

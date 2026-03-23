@@ -1,0 +1,55 @@
+============================================================
+RL DRONE HOVER -- TRAINING SUMMARY
+============================================================
+
+--- Monte Carlo ---
+  Evaluation reward : 374.64 +/- 0.00
+  Last-50 avg reward: 376.54
+  Training time     : 37.9s
+  Total episodes    : 500
+  Status            : PASS (threshold 220)
+
+--- Q-Learning ---
+  Evaluation reward : 410.56 +/- 0.00
+  Last-50 avg reward: 411.07
+  Training time     : 41.8s
+  Total episodes    : 500
+  Status            : PASS (threshold 220)
+
+Better algorithm: Q-Learning
+
+------------------------------------------------------------
+BONUS CHALLENGES
+------------------------------------------------------------
+
+--- SARSA (5 pts) ---
+  Evaluation reward : 374.64 +/- 0.00
+  Last-50 avg reward: 340.59
+  Training time     : 42.4s
+  Status            : PASS (threshold 300)
+  Points earned     : 5/5
+
+--- Double QL (7 pts) ---
+  Evaluation reward : 410.56 +/- 0.00
+  Last-50 avg reward: 411.04
+  Training time     : 37.1s
+  Status            : PASS (threshold 300)
+  Points earned     : 7/7
+
+--- Exp. Replay (8 pts) ---
+  Evaluation reward : 436.02 +/- 0.00
+  Last-50 avg reward: 326.12
+  Training time     : 56.6s
+  Status            : PASS (threshold 300)
+  Points earned     : 8/8
+
+Total bonus points: 20/20
+
+------------------------------------------------------------
+Hyperparameters used (baseline):
+  NUM_BINS  = 10
+  EPSILON   = 0.1 (exponential decay to 0.01)
+  GAMMA     = 0.99
+  ALPHA     = 0.1
+  EPISODES  = 500
+  MAX_STEPS = 240
