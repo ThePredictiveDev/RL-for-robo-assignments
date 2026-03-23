@@ -31,11 +31,12 @@ import seaborn as sns
 
 from utils import (
     GridEnv,
+    NUM_OBSTACLES_DEFAULT,
     policy_iteration,
     value_iteration,
     policy_evaluation,
     q_from_v,
-    policy_improvement
+    policy_improvement,
 )
 
 # ==========================================================================
@@ -50,33 +51,52 @@ if not os.path.exists(DELIVERABLES_PATH):
     os.makedirs(DELIVERABLES_PATH)
     print(f"Created deliverables folder: {DELIVERABLES_PATH}")
 
+# Grid / table reference (must match state_to_position and draw_grid)
+GRID_TABLE_CENTER = [0.0, -0.3, 0.65]
+# GIF camera looks at the grid on the table (not world origin), so grid + blocks are in frame
+GIF_CAMERA_TARGET = [0.0, -0.28, 0.68]
+GIF_CAMERA_DISTANCE = 1.18
+GIF_CAMERA_YAW = 50.0
+GIF_CAMERA_PITCH = -33.0
+GIF_CAMERA_ROLL = 0.0
+
 
 def save_frame():
     """Capture current frame from PyBullet camera for GIF creation."""
     try:
         width, height = 1280, 720
-        
-        # Get camera view matrix matching the visualizer
+
         view_matrix = p.computeViewMatrixFromYawPitchRoll(
-            cameraTargetPosition=[0, 0, 0.5],
-            distance=1.5,
-            yaw=45,
-            pitch=-30,
-            roll=0,
-            upAxisIndex=2
+            cameraTargetPosition=GIF_CAMERA_TARGET,
+            distance=GIF_CAMERA_DISTANCE,
+            yaw=GIF_CAMERA_YAW,
+            pitch=GIF_CAMERA_PITCH,
+            roll=GIF_CAMERA_ROLL,
+            upAxisIndex=2,
         )
         proj_matrix = p.computeProjectionMatrixFOV(
-            fov=60, aspect=width/height, nearVal=0.1, farVal=100
+            fov=58, aspect=width / height, nearVal=0.1, farVal=100
         )
-        
-        img = p.getCameraImage(width, height, view_matrix, proj_matrix)
+
+        # Hardware OpenGL renderer (GUI) includes user debug draw; TINY_RENDERER often omits it.
+        gl_renderer = getattr(p, "ER_BULLET_HARDWARE_OPENGL", None)
+        if gl_renderer is not None:
+            img = p.getCameraImage(
+                width,
+                height,
+                view_matrix,
+                proj_matrix,
+                renderer=gl_renderer,
+            )
+        else:
+            img = p.getCameraImage(width, height, view_matrix, proj_matrix)
         if img is None or img[2] is None:
             return None
         rgb_array = np.array(img[2]).reshape(height, width, 4)[:, :, :3]  # RGB only
-        
+
         image = Image.fromarray(rgb_array.astype(np.uint8))
         return image
-    except:
+    except Exception:
         return None
 
 
@@ -108,7 +128,7 @@ def save_gif(filename, duration=50):
     print(f"   Duration: {len(frames) * duration / 1000:.1f} seconds")
 
 
-def generate_value_heatmap(V, rows, cols, title, filename, policy=None):
+def generate_value_heatmap(V, rows, cols, title, filename, policy=None, obstacle_states=None):
     """Generate a proper seaborn heatmap of the value function.
     
     Args:
@@ -118,18 +138,33 @@ def generate_value_heatmap(V, rows, cols, title, filename, policy=None):
         title: Title for the heatmap
         filename: Output filename (full path)
         policy: Optional policy array to show arrows
+        obstacle_states: Optional set/frozenset of obstacle state indices (masked in plot)
     """
+    obstacle_states = obstacle_states or frozenset()
     # Reshape V to grid
-    V_grid = V.reshape(rows, cols)
-    
+    V_grid = V.reshape(rows, cols).astype(float).copy()
+    mask = np.zeros((rows, cols), dtype=bool)
+    for s in obstacle_states:
+        r, c = s // cols, s % cols
+        mask[r, c] = True
+        V_grid[r, c] = np.nan
+
     # Create figure
     fig, ax = plt.subplots(figsize=(10, 8))
     
-    # Create heatmap
-    sns.heatmap(V_grid, annot=True, fmt='.1f', cmap='viridis', 
-                cbar_kws={'label': 'Value V(s)'}, ax=ax,
-                linewidths=0.5, linecolor='white',
-                annot_kws={'size': 10, 'weight': 'bold'})
+    # Create heatmap (mask obstacle cells)
+    sns.heatmap(
+        V_grid,
+        annot=True,
+        fmt='.1f',
+        cmap='viridis',
+        cbar_kws={'label': 'Value V(s)'},
+        ax=ax,
+        linewidths=0.5,
+        linecolor='white',
+        annot_kws={'size': 10, 'weight': 'bold'},
+        mask=mask,
+    )
     
     # Mark start and goal
     ax.text(0.5, 0.5, 'S', ha='center', va='center', 
@@ -139,12 +174,20 @@ def generate_value_heatmap(V, rows, cols, title, filename, policy=None):
             fontsize=16, fontweight='bold', color='red',
             bbox=dict(boxstyle='circle', facecolor='white', alpha=0.8))
     
+    # Obstacle labels on masked cells (approximate positions)
+    for s in obstacle_states:
+        r, c = s // cols, s % cols
+        ax.text(c + 0.5, r + 0.5, 'X', ha='center', va='center',
+                fontsize=14, fontweight='bold', color='black')
+
     # Add policy arrows if provided
     if policy is not None:
         action_symbols = {0: '←', 1: '↓', 2: '→', 3: '↑'}
         for i in range(rows):
             for j in range(cols):
                 state = i * cols + j
+                if state in obstacle_states:
+                    continue
                 if state != len(V) - 1:  # Not goal
                     action = policy[state]
                     ax.text(j+0.5, i+0.75, action_symbols[action], 
@@ -160,7 +203,7 @@ def generate_value_heatmap(V, rows, cols, title, filename, policy=None):
     plt.close()
 
 
-def generate_comparison_heatmap(V1, V2, rows, cols, title1, title2, filename):
+def generate_comparison_heatmap(V1, V2, rows, cols, title1, title2, filename, obstacle_states=None):
     """Generate side-by-side heatmaps comparing two value functions.
     
     Args:
@@ -168,18 +211,32 @@ def generate_comparison_heatmap(V1, V2, rows, cols, title1, title2, filename):
         rows, cols: Grid dimensions
         title1, title2: Titles for each heatmap
         filename: Output filename
+        obstacle_states: Optional set/frozenset of obstacle state indices
     """
-    V1_grid = V1.reshape(rows, cols)
-    V2_grid = V2.reshape(rows, cols)
+    obstacle_states = obstacle_states or frozenset()
+    mask = np.zeros((rows, cols), dtype=bool)
+    for s in obstacle_states:
+        r, c = s // cols, s % cols
+        mask[r, c] = True
+
+    V1_grid = V1.reshape(rows, cols).astype(float).copy()
+    V2_grid = V2.reshape(rows, cols).astype(float).copy()
+    for s in obstacle_states:
+        r, c = s // cols, s % cols
+        V1_grid[r, c] = np.nan
+        V2_grid[r, c] = np.nan
     
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
     
     # First heatmap
     sns.heatmap(V1_grid, annot=True, fmt='.1f', cmap='viridis',
                 cbar_kws={'label': 'Value V(s)'}, ax=ax1,
-                linewidths=0.5, linecolor='white')
+                linewidths=0.5, linecolor='white', mask=mask)
     ax1.text(0.5, 0.5, 'S', ha='center', va='center', fontsize=14, color='lime', fontweight='bold')
     ax1.text(cols-0.5, rows-0.5, 'G', ha='center', va='center', fontsize=14, color='red', fontweight='bold')
+    for s in obstacle_states:
+        r, c = s // cols, s % cols
+        ax1.text(c + 0.5, r + 0.5, 'X', ha='center', va='center', fontsize=12, fontweight='bold', color='black')
     ax1.set_title(title1, fontsize=14, fontweight='bold')
     ax1.set_xlabel('Column')
     ax1.set_ylabel('Row')
@@ -187,9 +244,12 @@ def generate_comparison_heatmap(V1, V2, rows, cols, title1, title2, filename):
     # Second heatmap
     sns.heatmap(V2_grid, annot=True, fmt='.1f', cmap='viridis',
                 cbar_kws={'label': 'Value V(s)'}, ax=ax2,
-                linewidths=0.5, linecolor='white')
+                linewidths=0.5, linecolor='white', mask=mask)
     ax2.text(0.5, 0.5, 'S', ha='center', va='center', fontsize=14, color='lime', fontweight='bold')
     ax2.text(cols-0.5, rows-0.5, 'G', ha='center', va='center', fontsize=14, color='red', fontweight='bold')
+    for s in obstacle_states:
+        r, c = s // cols, s % cols
+        ax2.text(c + 0.5, r + 0.5, 'X', ha='center', va='center', fontsize=12, fontweight='bold', color='black')
     ax2.set_title(title2, fontsize=14, fontweight='bold')
     ax2.set_xlabel('Column')
     ax2.set_ylabel('Row')
@@ -389,7 +449,124 @@ def draw_grid(rows, cols, grid_size=0.10, table_center=[0, -0.3, 0.65]):
     p.addUserDebugText("GOAL", [goal_x, goal_y, z + 0.05], red, 1.0)
 
 
-def display_value_function(V, rows, cols, grid_size=0.10, table_center=[0, -0.3, 0.65]):
+def spawn_visible_grid_multibodies(rows, cols, grid_size=0.10, table_center=None):
+    """
+    Spawn thin box multibodies for grid lines so they appear in getCameraImage / GIF
+    (user debug lines are often invisible with the default software renderer).
+
+    Returns:
+        list[int]: PyBullet body unique ids (visual-only, mass 0).
+    """
+    if table_center is None:
+        table_center = GRID_TABLE_CENTER
+    body_ids = []
+    line_half_w = 0.0028
+    line_half_h = 0.014
+    z_surface = float(table_center[2]) + 0.004
+    rgba = [0.22, 0.22, 0.26, 1.0]
+
+    x_start = table_center[0] - (cols * grid_size) / 2
+    y_start = table_center[1] - (rows * grid_size) / 2
+    x_span = cols * grid_size
+    y_span = rows * grid_size
+
+    def _spawn_bar(center, half_extents):
+        vis = p.createVisualShape(
+            p.GEOM_BOX, halfExtents=half_extents, rgbaColor=rgba
+        )
+        bid = p.createMultiBody(
+            baseMass=0.0,
+            baseCollisionShapeIndex=-1,
+            baseVisualShapeIndex=vis,
+            basePosition=center,
+            baseOrientation=[0.0, 0.0, 0.0, 1.0],
+        )
+        body_ids.append(bid)
+
+    z_c = z_surface + line_half_h
+    # Horizontal rulers (constant y)
+    for i in range(rows + 1):
+        y = y_start + i * grid_size
+        cx = x_start + x_span / 2.0
+        _spawn_bar([cx, y, z_c], [x_span / 2.0, line_half_w, line_half_h])
+    # Vertical rulers (constant x)
+    for j in range(cols + 1):
+        x = x_start + j * grid_size
+        cy = y_start + y_span / 2.0
+        _spawn_bar([x, cy, z_c], [line_half_w, y_span / 2.0, line_half_h])
+
+    return body_ids
+
+
+def spawn_obstacle_cargo_blocks(
+    rows, cols, obstacle_states, grid_size=0.10, table_center=None
+):
+    """
+    Spawn small yellow cargo cubes on obstacle cells (readable as 'blocks' in the GIF),
+    similar to a cube the arm could manipulate.
+
+    Returns:
+        list[int]: PyBullet body unique ids (visual-only, mass 0).
+    """
+    if not obstacle_states:
+        return []
+    if table_center is None:
+        table_center = GRID_TABLE_CENTER
+    body_ids = []
+    # Cube size: clearly visible inside 0.10 m cells, matches typical toy pick-and-place scale
+    half = 0.032
+    rgba = [0.95, 0.78, 0.12, 1.0]
+
+    x_start = table_center[0] - (cols * grid_size) / 2
+    y_start = table_center[1] - (rows * grid_size) / 2
+    z_top = float(table_center[2]) + 0.006
+    z_center = z_top + half
+
+    for state in obstacle_states:
+        r = state // cols
+        c = state % cols
+        cx = x_start + (c + 0.5) * grid_size
+        cy = y_start + (r + 0.5) * grid_size
+        vis = p.createVisualShape(p.GEOM_BOX, halfExtents=[half, half, half], rgbaColor=rgba)
+        bid = p.createMultiBody(
+            baseMass=0.0,
+            baseCollisionShapeIndex=-1,
+            baseVisualShapeIndex=vis,
+            basePosition=[cx, cy, z_center],
+            baseOrientation=[0.0, 0.0, 0.0, 1.0],
+        )
+        body_ids.append(bid)
+    return body_ids
+
+
+def draw_obstacles(rows, cols, obstacle_states, grid_size=0.10, table_center=[0, -0.3, 0.65]):
+    """
+    Draw five obstacle cells as brown filled markers on the table grid.
+    obstacle_states: iterable of state indices (blocked cells).
+    """
+    if not obstacle_states:
+        return
+    x_start = table_center[0] - (cols * grid_size) / 2
+    y_start = table_center[1] - (rows * grid_size) / 2
+    z_base = table_center[2] + 0.012
+    half = grid_size * 0.38
+    brown = [0.45, 0.25, 0.12]
+    line_w = 2
+
+    for state in obstacle_states:
+        row = state // cols
+        col = state % cols
+        cx = x_start + (col + 0.5) * grid_size
+        cy = y_start + (row + 0.5) * grid_size
+        # Filled square outline (thick box)
+        p.addUserDebugLine([cx - half, cy - half, z_base], [cx + half, cy - half, z_base], brown, line_w, 0)
+        p.addUserDebugLine([cx + half, cy - half, z_base], [cx + half, cy + half, z_base], brown, line_w, 0)
+        p.addUserDebugLine([cx + half, cy + half, z_base], [cx - half, cy + half, z_base], brown, line_w, 0)
+        p.addUserDebugLine([cx - half, cy + half, z_base], [cx - half, cy - half, z_base], brown, line_w, 0)
+        p.addUserDebugText("OBS", [cx - 0.02, cy, z_base + 0.02], brown, 0.55)
+
+
+def display_value_function(V, rows, cols, grid_size=0.10, table_center=[0, -0.3, 0.65], obstacle_states=None):
     """
     Display the value function as text on the grid.
     """
@@ -399,7 +576,10 @@ def display_value_function(V, rows, cols, grid_size=0.10, table_center=[0, -0.3,
     
     text_color = [0, 0, 0]  # Black
     
+    obstacle_states = obstacle_states or frozenset()
     for state in range(len(V)):
+        if state in obstacle_states:
+            continue
         row = state // cols
         col = state % cols
         
@@ -484,9 +664,33 @@ if __name__ == "__main__":
     GOAL = ROWS * COLS - 1
     GAMMA = 0.99
     THETA = 1e-8
-    
-    # Create environment
-    env = GridEnv(rows=ROWS, cols=COLS, start=START, goal=GOAL)
+    # Five random obstacle cells (excludes start/goal); resampled until path to goal exists.
+    NUM_OBSTACLES = NUM_OBSTACLES_DEFAULT
+    # Set to an integer for reproducible obstacle layout; None uses nondeterministic sampling.
+    OBSTACLE_SEED = None
+
+    # Create environment with random obstacles in the MDP dynamics
+    env = GridEnv(
+        rows=ROWS,
+        cols=COLS,
+        start=START,
+        goal=GOAL,
+        num_obstacles=NUM_OBSTACLES,
+        obstacle_seed=OBSTACLE_SEED,
+    )
+    obs_sorted = sorted(env.obstacle_states)
+    print("\n" + "="*60)
+    print("GRID OBSTACLES (5 random blocked cells, MDP + visualization)")
+    print("="*60)
+    print(f"  Obstacle states (indices): {obs_sorted}")
+    print(f"  Obstacle (row, col): {[(s // COLS, s % COLS) for s in obs_sorted]}")
+    obs_info_path = os.path.join(DELIVERABLES_PATH, "obstacle_layout.txt")
+    with open(obs_info_path, "w", encoding="utf-8") as obsf:
+        obsf.write("Random obstacle layout (5 cells, start and goal never blocked)\n")
+        obsf.write(f"seed: {OBSTACLE_SEED!r}\n")
+        obsf.write(f"states: {obs_sorted}\n")
+        obsf.write(f"(row,col): {[(s // COLS, s % COLS) for s in obs_sorted]}\n")
+    print(f"  Saved: {obs_info_path}")
 
     # Run Policy Iteration
     print("\n" + "="*60)
@@ -544,21 +748,24 @@ if __name__ == "__main__":
         pi_V, ROWS, COLS, 
         'Policy Iteration: State-Value Function V(s)', 
         os.path.join(DELIVERABLES_PATH, 'heatmap_policy_iteration.png'),
-        policy=pi_policy
+        policy=pi_policy,
+        obstacle_states=env.obstacle_states,
     )
     
     generate_value_heatmap(
         vi_V, ROWS, COLS,
         'Value Iteration: State-Value Function V(s)',
         os.path.join(DELIVERABLES_PATH, 'heatmap_value_iteration.png'),
-        policy=vi_policy
+        policy=vi_policy,
+        obstacle_states=env.obstacle_states,
     )
     
     # Generate comparison heatmap
     generate_comparison_heatmap(
         pi_V, vi_V, ROWS, COLS,
         'Policy Iteration', 'Value Iteration',
-        os.path.join(DELIVERABLES_PATH, 'heatmap_comparison.png')
+        os.path.join(DELIVERABLES_PATH, 'heatmap_comparison.png'),
+        obstacle_states=env.obstacle_states,
     )
     
     print("="*60)
@@ -572,10 +779,10 @@ if __name__ == "__main__":
     p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
     
     p.resetDebugVisualizerCamera(
-        cameraDistance=1.5,
-        cameraYaw=45,
-        cameraPitch=-30,
-        cameraTargetPosition=[0, 0, 0.5]
+        cameraDistance=GIF_CAMERA_DISTANCE,
+        cameraYaw=GIF_CAMERA_YAW,
+        cameraPitch=GIF_CAMERA_PITCH,
+        cameraTargetPosition=GIF_CAMERA_TARGET,
     )
 
     p.loadURDF("plane.urdf")
@@ -593,11 +800,20 @@ if __name__ == "__main__":
     
     sys.stderr = old_stderr
 
-    # Draw the grid for visualization
-    draw_grid(ROWS, COLS, grid_size=0.10, table_center=[0, -0.3, 0.65])
+    # Draw the grid for visualization (debug lines + labels in GUI)
+    draw_grid(ROWS, COLS, grid_size=0.10, table_center=GRID_TABLE_CENTER)
+    draw_obstacles(ROWS, COLS, env.obstacle_states, grid_size=0.10, table_center=GRID_TABLE_CENTER)
+    # Real multibodies so GIF capture shows grid lines and obstacle blocks (not only debug draw)
+    spawn_visible_grid_multibodies(ROWS, COLS, grid_size=0.10, table_center=GRID_TABLE_CENTER)
+    spawn_obstacle_cargo_blocks(
+        ROWS, COLS, env.obstacle_states, grid_size=0.10, table_center=GRID_TABLE_CENTER
+    )
     
     # Display value function as heatmap text
-    display_value_function(vi_V, ROWS, COLS, grid_size=0.10, table_center=[0, -0.3, 0.65])
+    display_value_function(
+        vi_V, ROWS, COLS, grid_size=0.10, table_center=GRID_TABLE_CENTER,
+        obstacle_states=env.obstacle_states,
+    )
     
     print("\n" + "="*60)
     print("SIMULATION WITH VIDEO RECORDING")
@@ -667,6 +883,8 @@ if __name__ == "__main__":
     for state in range(env.nS):
         if state == GOAL:
             continue
+        if state in env.obstacle_states:
+            continue
             
         row = state // COLS
         col = state % COLS
@@ -711,17 +929,32 @@ if __name__ == "__main__":
     print("  2. heatmap_policy_iteration.png - Seaborn heatmap (PI)")
     print("  3. heatmap_value_iteration.png - Seaborn heatmap (VI)")
     print("  4. heatmap_comparison.png - Side-by-side comparison")
-    print("  5. analysis_report.txt - Detailed analysis")
-    print("  6. comparison_table.txt - Performance comparison")
+    print("  5. obstacle_layout.txt - Random 5-cell obstacle indices and (row,col)")
+    print("  6. analysis_report.txt - Detailed analysis (if generated)")
+    print("  7. comparison_table.txt - Performance comparison (if generated)")
     print("\nAssignment Parts Demonstrated:")
-    print("  - Part 1: Policy Evaluation (in analysis.py)")
-    print("  - Part 2: Q-value Computation (in analysis.py)")
-    print("  - Part 3: Policy Improvement (in analysis.py)")
-    print("  - Part 4: Policy Iteration (this simulation)")
-    print("  - Part 5: Value Iteration (this simulation)")
-    print("  - Part 6: Unseen environments (in analysis.py)")
+    print("  - Part 1: Policy Evaluation (utils.policy_evaluation, used inside PI)")
+    print("  - Part 2: Q from V (utils.q_from_v, used in improvement and VI)")
+    print("  - Part 3: Policy Improvement (utils.policy_improvement)")
+    print("  - Part 4: Policy Iteration (utils.policy_iteration + this simulation)")
+    print("  - Part 5: Value Iteration (utils.value_iteration + this simulation)")
+    print("  - Part 6: General GridEnv works for other grids/seeds (same DP code)")
     print("="*60)
     
+    # Automated runs: set SKIP_INFINITE_SIM_LOOP=1 to exit after GIF (no endless GUI loop).
+    if os.environ.get("SKIP_INFINITE_SIM_LOOP", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "y",
+    ):
+        print("\nSKIP_INFINITE_SIM_LOOP set: disconnecting PyBullet and exiting.")
+        try:
+            p.disconnect()
+        except Exception:
+            pass
+        raise SystemExit(0)
+
     print("\nSimulation running. Press Ctrl+C to exit.")
     try:
         while True:

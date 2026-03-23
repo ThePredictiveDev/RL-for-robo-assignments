@@ -8,12 +8,109 @@ Author: Assignment 1 - AR525
 ==========================================================================
 """
 
+from collections import deque
+
 import numpy as np
+
+# Default number of obstacle cells (README: grid with randomly placed obstacles).
+NUM_OBSTACLES_DEFAULT = 5
+
+
+def _bfs_path_exists(rows, cols, start, goal, obstacle_states):
+    """Return True iff a path exists from start to goal using 4-neighbors on free cells."""
+    if start == goal:
+        return True
+    if start in obstacle_states or goal in obstacle_states:
+        return False
+    visited = set()
+    q = deque([start])
+    visited.add(start)
+
+    def neighbors(state):
+        r, c = state // cols, state % cols
+        for dr, dc in ((0, -1), (1, 0), (0, 1), (-1, 0)):
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < rows and 0 <= nc < cols:
+                ns = nr * cols + nc
+                if ns not in obstacle_states:
+                    yield ns
+
+    while q:
+        s = q.popleft()
+        for ns in neighbors(s):
+            if ns == goal:
+                return True
+            if ns not in visited:
+                visited.add(ns)
+                q.append(ns)
+    return False
+
+
+def sample_obstacle_states(rows, cols, start, goal, num_obstacles, rng, max_attempts=500):
+    """
+    Sample ``num_obstacles`` distinct obstacle cells excluding start and goal.
+    Resample until BFS confirms start can still reach goal (solvable instance).
+
+    Args:
+        rows, cols: Grid shape.
+        start, goal: State indices.
+        num_obstacles: How many blocked cells.
+        rng: numpy.random.Generator
+        max_attempts: Cap on resampling to avoid infinite loop.
+
+    Returns:
+        frozenset of obstacle state indices.
+
+    Raises:
+        RuntimeError: If no valid placement found within max_attempts.
+    """
+    nS = rows * cols
+    if num_obstacles <= 0:
+        return frozenset()
+    pool = [s for s in range(nS) if s != start and s != goal]
+    if len(pool) < num_obstacles:
+        raise ValueError(
+            f"Cannot place {num_obstacles} obstacles: only {len(pool)} cells available "
+            f"(excluding start={start} and goal={goal})."
+        )
+    for _ in range(max_attempts):
+        choice = rng.choice(pool, size=num_obstacles, replace=False)
+        obs = frozenset(int(x) for x in choice)
+        if _bfs_path_exists(rows, cols, start, goal, obs):
+            return obs
+    raise RuntimeError(
+        f"Could not sample {num_obstacles} obstacles with a valid path after {max_attempts} attempts."
+    )
+
 
 class GridEnv:
     
-    def __init__(self, rows=5, cols=6, start=0, goal=29):
-   
+    def __init__(
+        self,
+        rows=5,
+        cols=6,
+        start=0,
+        goal=29,
+        num_obstacles=NUM_OBSTACLES_DEFAULT,
+        obstacle_states=None,
+        obstacle_seed=None,
+        max_obstacle_resamples=500,
+    ):
+        """
+        Grid world MDP with optional randomly placed obstacle cells.
+
+        Obstacles block movement: attempting to step onto an obstacle leaves the agent
+        in the current state (same as hitting an outer wall). States that are obstacles
+        are absorbing under self-transitions if ever entered (start/goal are never obstacles).
+
+        Args:
+            rows, cols: Grid dimensions.
+            start, goal: Start and goal state indices.
+            num_obstacles: Number of random obstacles (ignored if obstacle_states is set).
+            obstacle_states: If not None, use this exact frozenset/set of obstacle states.
+            obstacle_seed: Seed for numpy.random.Generator when sampling obstacles.
+            max_obstacle_resamples: Max samples when seeking a solvable obstacle layout.
+        """
         self.rows = rows
         self.cols = cols
         self.nS = rows * cols
@@ -21,6 +118,22 @@ class GridEnv:
         self.start = start
         self.goal = goal
         self.action_names = {0: 'LEFT', 1: 'DOWN', 2: 'RIGHT', 3: 'UP'}
+
+        if obstacle_states is not None:
+            obs = frozenset(int(s) for s in obstacle_states)
+            if start in obs or goal in obs:
+                raise ValueError("Obstacle states must not include start or goal.")
+            if not _bfs_path_exists(rows, cols, start, goal, obs):
+                raise ValueError("Provided obstacle_states block all paths from start to goal.")
+            self.obstacle_states = obs
+        elif num_obstacles and num_obstacles > 0:
+            rng = np.random.default_rng(obstacle_seed)
+            self.obstacle_states = sample_obstacle_states(
+                rows, cols, start, goal, num_obstacles, rng, max_attempts=max_obstacle_resamples
+            )
+        else:
+            self.obstacle_states = frozenset()
+
         self.P = self._build_dynamics()
     
     def _state_to_pos(self, state):
@@ -36,9 +149,12 @@ class GridEnv:
         return 0 <= row < self.rows and 0 <= col < self.cols
     
     def _get_next_state(self, state, action):
-  
+        # If somehow in an obstacle cell, cannot leave (closed dynamics on obstacle set).
+        if state in self.obstacle_states:
+            return state
+
         row, col = self._state_to_pos(state)
-        
+
         if action == 0:    # LEFT
             col -= 1
         elif action == 1:  # DOWN
@@ -47,11 +163,15 @@ class GridEnv:
             col += 1
         elif action == 3:  # UP
             row -= 1
-        
+
         if not self._is_valid_pos(row, col):
             return state
-        
-        return self._pos_to_state(row, col)
+
+        next_state = self._pos_to_state(row, col)
+        if next_state in self.obstacle_states:
+            return state
+
+        return next_state
     
     def _build_dynamics(self):
 
@@ -71,7 +191,7 @@ class GridEnv:
                     reward = 100.0
                     done = True
                 elif next_state == state:
-                    # Hitting a wall/boundary - slightly worse than normal step
+                    # Hitting wall, boundary, or blocked obstacle cell
                     reward = -2.0
                     done = False
                 else:
